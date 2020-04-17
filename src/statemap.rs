@@ -1,6 +1,6 @@
 /*
  * Copyright 2020 Joyent, Inc. and other contributors
- */ 
+ */
 
 extern crate memmap;
 extern crate serde;
@@ -8,6 +8,8 @@ extern crate serde_json;
 extern crate natord;
 extern crate palette;
 extern crate rand;
+
+use serde::{Deserialize,Serialize};
 
 /*
  * The StatemapInput* types denote the structure of the concatenated JSON
@@ -177,6 +179,11 @@ struct StatemapSVGLocals<'a> {
     title: String,
 }
 
+struct EntityData {
+    data: Vec<String>,
+    string: String
+}
+
 pub struct StatemapSVG<'a> {
     config: &'a StatemapSVGConfig,
 }
@@ -199,7 +206,7 @@ use self::serde_json::Value;
 
 impl Default for Config {
     fn default() -> Config {
-        Config { 
+        Config {
             maxrect: 25000,
             begin: 0,
             end: 0,
@@ -272,7 +279,7 @@ impl FromStr for StatemapColor {
             }
         }
 
-        return Err(StatemapError { 
+        return Err(StatemapError {
             errmsg: format!("\"{}\" is not a valid color", name)
         });
     }
@@ -608,8 +615,9 @@ impl StatemapEntity {
 
     fn output_svg(&self, id: usize, begin: i64, config: &StatemapSVGConfig,
         globals: &StatemapSVGGlobals, locals: &StatemapSVGLocals,
-        colors: &Vec<StatemapColor>, y: u32) -> Vec<String>
+        colors: &Vec<StatemapColor>, y: u32) -> EntityData
     {
+        let mut entitystr = String::new();
         let rect_width = |rect: &StatemapRect| -> f64 {
             /*
              * We add a fuzz factor to our width to assure it will always be
@@ -648,12 +656,14 @@ impl StatemapEntity {
             }
         };
 
-        let background = |x: f64, width: f64| {
+        let background = |x: f64, width: f64| -> String {
+            let mut bg = String::new();
             if width > 0.0 {
-                println!(r##"<rect x="{}" y="{}" width="{}"
+                bg.push_str(&format!(r##"<rect x="{}" y="{}" width="{}"
                     height="{}" style="fill:{}" />"##, x, y, width,
-                    config.stripHeight, config.background);
+                    config.stripHeight, config.background));
             }
+            bg
         };
 
         let mut x: f64 = 0.0;
@@ -664,12 +674,12 @@ impl StatemapEntity {
         map.sort();
 
         if map.len() >= 1 && map[0] > begin {
-            background(0.0, ((map[0] - begin) as f64 /
-                globals.timeWidth as f64) * globals.pixelWidth as f64);
+            entitystr.push_str(background(0.0, ((map[0] - begin) as f64 /
+                globals.timeWidth as f64) * globals.pixelWidth as f64).as_str());
         }
 
-        println!(r##"<g id="{}{}-{}"><title>{} {}</title>"##,
-            globals.entityPrefix, id, self.name, locals.entityKind, self.name);
+        entitystr.push_str(&format!(r##"<g id="{}{}-{}"><title>{} {}</title>"##,
+            globals.entityPrefix, id, self.name, locals.entityKind, self.name));
 
         for i in 0..map.len() {
             let rect = self.rects.get(&(map[i] as u64)).unwrap().borrow();
@@ -702,10 +712,10 @@ impl StatemapEntity {
                 datum.push_str("}");
                 data.push(datum);
 
-                println!(concat!(r##"<rect x="{}" y="{}" width="{}" "##,
+                entitystr.push_str(&format!(concat!(r##"<rect x="{}" y="{}" width="{}" "##,
                     r##"height="{}" onclick="mapclick(evt, {})" "##,
                     r##"style="fill:{}" />"##), x, y, w, config.stripHeight,
-                    data.len() - 1, colors[state.unwrap()]);
+                    data.len() - 1, colors[state.unwrap()]));
                 x += w;
 
                 continue;
@@ -717,7 +727,7 @@ impl StatemapEntity {
             let mut color = colors[max];
             let mut datum = format!("{{ t: {}, s: {{ ", rect.start);
             let mut comma = "";
-            
+
             for j in 0..rect.states.len() {
                 if rect.states[j] == 0 {
                     continue;
@@ -739,29 +749,32 @@ impl StatemapEntity {
             datum.push_str("}");
             data.push(datum);
 
-            println!(concat!(r##"<rect x="{}" y="{}" width="{}" "##,
+            entitystr.push_str(&format!(concat!(r##"<rect x="{}" y="{}" width="{}" "##,
                 r##"height="{}" onclick="mapclick(evt, {})" "##,
                 r##"style="fill:{}" />"##), x, y, w,
-                config.stripHeight, data.len() - 1, color);
+                config.stripHeight, data.len() - 1, color));
             x += w;
         }
 
-        println!("</g>");
+        entitystr.push_str("</g>");
 
         /*
          * Finally, add a background rectangle that covers whatever remains
          * of our width.
          */
-        background(x, globals.pixelWidth as f64 - x);
+        entitystr.push_str(background(x, globals.pixelWidth as f64 - x).as_str());
 
-        data
+        EntityData {
+            data: data,
+            string: entitystr
+        }
     }
 
     #[cfg(test)]
     fn print(&self, header: &str) {
         let mut v: Vec<u64>;
         let l: usize;
-        
+
         v = self.rects.values().map(|r| r.borrow().start).collect();
         v.sort();
         l = v.len();
@@ -779,7 +792,7 @@ impl StatemapEntity {
     fn verify(&self) {
         let mut v: Vec<u64>;
         let l: usize;
-        
+
         v = self.rects.values().map(|r| r.borrow().start).collect();
         v.sort();
         l = v.len();
@@ -1023,7 +1036,7 @@ impl Statemap {
 
         remove = *self.byweight.iter().next().unwrap();
         self.byweight.remove(&remove);
-        
+
         /*
          * We need a scope here to help the compiler out with respect to
          * our use of entity.
@@ -1176,7 +1189,7 @@ impl Statemap {
         };
 
         self.apply(updates, &mut rweight);
-        self.print(&format!("After subsuming {} from {}", victim, what)); 
+        self.print(&format!("After subsuming {} from {}", victim, what));
         self.verify();
     }
 
@@ -1554,7 +1567,7 @@ impl Statemap {
                 self.trim();
             }
         }
-        
+
         self.ingest_end();
 
         eprintln!("{}: {} records processed, {} rectangles",
@@ -1567,7 +1580,7 @@ impl Statemap {
         (self.begin, self.end)
     }
 
-    fn output_defs(&self) {
+    fn output_defs(&self) -> String {
         /*
          * Provide an "entities" member that has the descriptions for each
          * entity, if they have one.  Yes, this is a little goofy -- it
@@ -1576,7 +1589,9 @@ impl Statemap {
          * the sake of compatibility with the legacy implementation, however
          * dubious..
          */
-        println!("entities: {{");
+
+        let mut defstr = String::new();
+        defstr.push_str("entities: {");
 
         let mut comma = "";
 
@@ -1588,11 +1603,11 @@ impl Statemap {
                 _ => { "".to_string() }
             };
 
-            println!("    {} \"{}\": {{ {} }}", comma, entity.name, val);
+            defstr.push_str(&format!("    {} \"{}\": {{ {} }}", comma, entity.name, val));
             comma = ",";
         }
 
-        println!("}}");
+        defstr.push_str("}");
 
         if self.tags.len() > 0 {
             /*
@@ -1607,47 +1622,52 @@ impl Statemap {
 
             tags.sort_unstable();
 
-            println!(", tags: [");
+            defstr.push_str(&format!(", tags: ["));
 
             for i in 0..tags.len() {
                 let (value, id) =
                     self.tags.get(&(tags[i].1, tags[i].2.to_string())).unwrap();
 
                 assert_eq!(i, *id);
-                println!("{}{}", serde_json::to_string_pretty(value).unwrap(),
-                    if i < tags.len() - 1 { "," } else { "" });
+                defstr.push_str(&format!("{}{}", serde_json::to_string_pretty(value).unwrap(),
+                    if i < tags.len() - 1 { "," } else { "" }));
             }
 
-            println!("]");
+            defstr.push_str("]");
         }
+        defstr
     }
 
     fn output_svg(&self, id: usize, config: &StatemapSVGConfig,
         globals: &StatemapSVGGlobals,
-        colors: &Vec<StatemapColor>) -> Result<(), Box<dyn Error>>
+        colors: &Vec<StatemapColor>) -> Result<String, Box<dyn Error>>
     {
-        let output_data = |data: &HashMap<&String, Vec<String>>| {
-            println!("\"data\": {{ ");
+        let mut svgstr = String::new();
+
+        let output_data = |data: &HashMap<&String, Vec<String>>| -> String {
+            let mut innerstr = String::new();
+            innerstr.push_str("\"data\": { ");
             let mut comma = "";
 
             for entity in data.keys() {
-                println!("{}\"{}\": [", comma, entity);
+                innerstr.push_str(&format!("{}\"{}\": [", comma, entity));
 
                 let datum = data.get(entity).unwrap();
 
                 if datum.len() > 0 {
                     for i in 0..datum.len() - 1 {
-                        println!("{},", datum[i]);
+                        innerstr.push_str(&format!("{},", datum[i]));
                     }
 
-                    println!("{}", datum[datum.len() - 1]);
+                    innerstr.push_str(&format!("{}", datum[datum.len() - 1]));
                 }
 
-                println!("]");
+                innerstr.push_str("]");
                 comma = ",";
             }
 
-            println!(r##"}},"##);
+            innerstr.push_str(&format!(r##"}},"##));
+            innerstr
         };
 
         let metadata = match self.metadata {
@@ -1680,8 +1700,8 @@ impl Statemap {
 
         let entities = self.sort(sort);
 
-        println!(r##"<g id="statemap-{}" transform="matrix(1 0 0 1 0 0)">"##,
-            id);
+        svgstr.push_str(&format!(r##"<g id="statemap-{}" transform="matrix(1 0 0 1 0 0)">"##,
+            id));
 
         let mut y = 0;
         let mut data = HashMap::new();
@@ -1703,29 +1723,30 @@ impl Statemap {
 
         for e in entities {
             let entity = self.entities.get(self.byid.get(e).unwrap()).unwrap();
-            data.insert(&entity.name, entity.output_svg(id,
-                self.config.begin, config, globals, &locals, &colors, y));
+            let entity_output = entity.output_svg(id, self.config.begin, config, globals, &locals, &colors, y);
+            svgstr.push_str(entity_output.string.as_str());
+            data.insert(&entity.name, entity_output.data);
             y += config.stripHeight;
         }
 
-        println!("</g>");
+        svgstr.push_str(&format!("</g>"));
 
         /*
          * Finally, output our element in the global statemaps array.
          */
-        println!("<defs>");
-        println!(r##"<script type="application/ecmascript"><![CDATA["##);
+        svgstr.push_str(&format!("<defs>"));
+        svgstr.push_str(&format!(r##"<script type="application/ecmascript"><![CDATA["##));
 
         let str = serde_json::to_string_pretty(&locals).unwrap();
 
-        println!("g_statemaps[{}] = {{\n{},", id, &str[2..str.len() - 2]);
+        svgstr.push_str(&format!("g_statemaps[{}] = {{\n{},", id, &str[2..str.len() - 2]));
 
-        output_data(&data);
-        self.output_defs();
+        svgstr.push_str(output_data(&data).as_str());
+        svgstr.push_str(self.output_defs().as_str());
 
-        println!(r##"}} ]]></script></defs>"##);
+        svgstr.push_str(&format!(r##"}} ]]></script></defs>"##));
 
-        Ok(())
+        Ok(svgstr)
     }
 }
 
@@ -1736,41 +1757,43 @@ impl<'a> StatemapSVG<'a> {
         }
     }
 
-    fn output_defs(&self, globals: &StatemapSVGGlobals)
+    fn output_defs(&self, globals: &StatemapSVGGlobals) -> String
     {
-        println!("<defs>");
+        let mut defstr = String::new();
+        defstr.push_str("<defs>");
 
-        println!("<script type=\"application/ecmascript\"><![CDATA[");
+        defstr.push_str("<script type=\"application/ecmascript\"><![CDATA[");
 
-        println!("var globals = {{");
+        defstr.push_str("var globals = {");
         let str = serde_json::to_string_pretty(&self.config).unwrap();
-        println!("{},", &str[2..str.len() - 2]);
+        defstr.push_str(&format!("{},", &str[2..str.len() - 2]));
 
         let str = serde_json::to_string_pretty(&globals).unwrap();
-        println!("{},", &str[2..str.len() - 2]);
-        println!("}}");
+        defstr.push_str(&format!("{},", &str[2..str.len() - 2]));
+        defstr.push_str("}");
 
         /*
          * Now drop in our in-SVG code.
          */
         let lib = include_str!("statemap-svg.js");
 
-        println!("{}\n]]></script>", lib);
+        defstr.push_str(&format!("{}\n]]></script>", lib));
 
         /*
          * Next up: CSS.
          */
         let css = include_str!("statemap-svg.css");
 
-        println!("<style type=\"text/css\"><![CDATA[\n{}\n]]></style>", css);
+        defstr.push_str(&format!("<style type=\"text/css\"><![CDATA[\n{}\n]]></style>", css));
 
         /*
          * And now other definitions.
          */
         let defs = include_str!("statemap-svg.defs");
-        println!("{}", defs);
+        defstr.push_str(&format!("{}", defs));
 
-        println!("</defs>");
+        defstr.push_str("</defs>");
+        defstr
     }
 
     fn title(&self, statemaps: &Vec<Statemap>) -> String
@@ -1832,7 +1855,7 @@ impl<'a> StatemapSVG<'a> {
     }
 
     pub fn output(&self, statemaps: &Vec<Statemap>) ->
-        Result<(), Box<dyn Error>>
+        Result<String, Box<dyn Error>>
     {
         struct Props {
             x: u32,
@@ -1845,10 +1868,14 @@ impl<'a> StatemapSVG<'a> {
 
         let base = &statemaps[0];
 
-        let output_controls = |props: &Props| {
+        let mut svgout = String::new();
+
+        let output_controls = |props: &Props| -> String {
             let width = props.width / 4;
             let mut x = 0;
             let y = 0;
+
+            let mut innerstr = String::new();
 
             let icons = vec![
                 (include_str!("./icons/arrow-left-l.svg"), "panclick(50, 0)"),
@@ -1857,51 +1884,57 @@ impl<'a> StatemapSVG<'a> {
                 (include_str!("./icons/arrow-right-l.svg"), "panclick(-50, 0)")
             ];
 
-            println!(r##"<svg x="{}px" y="{}px" width="{}px" height="{}px">"##,
-                props.x, props.y, props.width, props.height);
+            innerstr.push_str(&format!(r##"<svg x="{}px" y="{}px" width="{}px" height="{}px">"##,
+                props.x, props.y, props.width, props.height));
 
             for i in 0..icons.len() {
-                println!(r##"<svg x="{}px" y="{}px" width="{}px" height="{}px"
-                    onclick="{}"><rect x="0px" y="0px" width="{}px" 
+                innerstr.push_str(&format!(r##"<svg x="{}px" y="{}px" width="{}px" height="{}px"
+                    onclick="{}"><rect x="0px" y="0px" width="{}px"
                     height="{}px" onclick="{}" class="button" />{}</svg>"##,
                     x, y, width, width, icons[i].1,
-                    width, width, icons[i].1, icons[i].0);
+                    width, width, icons[i].1, icons[i].0));
                 x += width;
             }
 
-            println!("</svg>");
+            innerstr.push_str(&format!("</svg>"));
+            innerstr
         };
 
         let output_legend = |statemap: &Statemap, id: usize,
-            props: &mut Props, colors: &Vec<StatemapColor>|
+            props: &mut Props, colors: &Vec<StatemapColor>| -> String
         {
             let x = props.x;
             let mut y = props.y;
             let height = props.lheight;
             let width = props.width;
 
+            let mut innerstr = String::new();
+
             for state in 0..statemap.states.len() {
-                println!(concat!(r##"<rect x="{}" y="{}" width="{}" "##,
+                innerstr.push_str(&format!(concat!(r##"<rect x="{}" y="{}" width="{}" "##,
                     r##"height="{}" id="statemap-legend-{}-{}" "##,
                     r##"onclick="legendclick(evt, {}, {})" "##,
                     r##"class="statemap-legend" style="fill:{}" />"##),
-                    x, y, width, height, id, state, id, state, colors[state]);
+                    x, y, width, height, id, state, id, state, colors[state]));
                 y += height + props.spacing;
 
-                println!(concat!(r##"<text x="{}" y="{}" "##,
+                innerstr.push_str(&format!(concat!(r##"<text x="{}" y="{}" "##,
                     r##"class="statemap-legendlabel sansserif">{}</text>"##),
-                    x + (width / 2), y, statemap.states[state].name);
+                    x + (width / 2), y, statemap.states[state].name));
                 y += props.spacing;
             }
 
             props.y = y;
+            innerstr
         };
 
-        let output_tagbox = || {
+        let output_tagbox = || -> String {
+            let mut innerstr = String::new();
             if !base.config.notags {
-                println!(r##"<g id="statemap-tagbox"></g>"##);
-                println!(r##"<g id="statemap-tagbox-select"></g>"##);
+                innerstr.push_str(&format!(r##"<g id="statemap-tagbox"></g>"##));
+                innerstr.push_str(&format!(r##"<g id="statemap-tagbox-select"></g>"##));
             }
+            innerstr
         };
 
         let metadata = match base.metadata {
@@ -2036,15 +2069,15 @@ impl<'a> StatemapSVG<'a> {
             }
         }
 
-        println!(r##"<?xml version="1.0"?>
+        svgout.push_str(&format!(r##"<?xml version="1.0"?>
             <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
                 "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
             <svg width="{}" height="{}"
                 xmlns="http://www.w3.org/2000/svg"
                 version="1.1"
-                onload="init(evt)">"##, width, globals.totalHeight);
+                onload="init(evt)">"##, width, globals.totalHeight));
 
-        self.output_defs(&globals);
+        svgout.push_str(self.output_defs(&globals).as_str());
 
         let mut y = tmargin;
 
@@ -2054,8 +2087,8 @@ impl<'a> StatemapSVG<'a> {
             let height = statemap.entities.len() as u32 *
                 self.config.stripHeight;
 
-            println!(r##"<svg x="{}px" y="{}px" width="{}px" height="{}px">"##,
-                lmargin, y, globals.pixelWidth, height);
+            svgout.push_str(&format!(r##"<svg x="{}px" y="{}px" width="{}px" height="{}px">"##,
+                lmargin, y, globals.pixelWidth, height));
 
             /*
              * First, we drop down a background rectangle as big as our SVG.
@@ -2063,47 +2096,49 @@ impl<'a> StatemapSVG<'a> {
              * and then rectangles can be made transparent to become
              * highlighted.
              */
-            println!(concat!(r##"<rect x="0px" y="0px" width="{}px" "##,
+            svgout.push_str(&format!(concat!(r##"<rect x="0px" y="0px" width="{}px" "##,
                 r##"height="{}px" fill="{}" id="statemap-{}-highlight" />"##),
-                globals.pixelWidth, height, self.config.background, i);
+                globals.pixelWidth, height, self.config.background, i));
 
-            statemap.output_svg(i, &self.config, &globals, &colors[i])?;
+            let sm_output = statemap.output_svg(i, &self.config, &globals, &colors[i])?;
+            svgout.push_str(sm_output.as_str());
 
-            println!("</svg>");
+            svgout.push_str(&format!("</svg>"));
 
             /*
              * The border around this statemap.
              */
-            println!(r##"<polygon class="statemap-border""##);
-            println!(r##"  points="{} {}, {} {}, {} {}, {} {}"/>"##,
+            svgout.push_str(&format!(r##"<polygon class="statemap-border""##));
+            svgout.push_str(&format!(r##"  points="{} {}, {} {}, {} {}, {} {}"/>"##,
                 lmargin, y, lmargin + globals.pixelWidth, y,
-                lmargin + globals.pixelWidth, y + height, lmargin, y + height);
+                lmargin + globals.pixelWidth, y + height, lmargin, y + height));
 
             y += height + smargin;
         }
 
-        println!(concat!(r##"<text x="{}" y="{}" "##,
+        svgout.push_str(&format!(concat!(r##"<text x="{}" y="{}" "##,
             r##"class="statemap-title sansserif">{}</text>"##),
             lmargin + (globals.pixelWidth / 2), 16,
-            self.title(statemaps));
+            self.title(statemaps)));
 
-        println!(concat!(r##"<text x="{}" y="{}" class="statemap-timelabel"##,
+        svgout.push_str(&format!(concat!(r##"<text x="{}" y="{}" class="statemap-timelabel"##,
             r##" sansserif" id="statemap-timelabel"></text>"##),
-            lmargin + (globals.pixelWidth / 2), 34);
+            lmargin + (globals.pixelWidth / 2), 34));
 
-        println!(r##"<line x1="{}" y1="{}" x2="{}" y2="{}""##,
-            lmargin + 10, 40, lmargin + globals.pixelWidth - 10, 40);
-        println!(r##"class="statemap-timeline" />"##);
+        svgout.push_str(&format!(r##"<line x1="{}" y1="{}" x2="{}" y2="{}""##,
+            lmargin + 10, 40, lmargin + globals.pixelWidth - 10, 40));
+        svgout.push_str(&format!(r##"class="statemap-timeline" />"##));
 
         props.width -= (2 * props.x) + 10;
 
-        output_controls(&props);
+        let output_controls_str = output_controls(&props);
+        svgout.push_str(output_controls_str.as_str());
 
         props.y += props.height;
 
         for i in 0..statemaps.len() {
             if i == 0 || statemaps[i].states != statemaps[i - 1].states {
-                output_legend(&statemaps[i], i, &mut props, &colors[i]);
+                svgout.push_str(output_legend(&statemaps[i], i, &mut props, &colors[i]).as_str());
             }
 
             if !sharedlegend {
@@ -2111,947 +2146,947 @@ impl<'a> StatemapSVG<'a> {
             }
         }
 
-        output_tagbox();
+        svgout.push_str(output_tagbox().as_str());
 
-        println!("</svg>");
+        svgout.push_str(&format!("</svg>"));
 
-        Ok(())
+        Ok(svgout)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::env;
-    use std::process;
-    use std::fs;
-    use std::io::Write;
-
-    fn metadata(config: Option<&Config>, mut metadata: &str) -> Statemap {
-        let mut statemap;
-
-        match config {
-            Some(config) => { statemap = Statemap::new(&config); },
-            None => {
-                let config: Config = Default::default();
-                statemap = Statemap::new(&config);
-            }
-        }
-
-        match statemap.ingest_metadata(&mut metadata) {
-            Err(err) => { panic!("metadata incorrectly failed: {:?}", err); }
-            Ok(_) => { statemap }
-        }
-    }
-
-    fn minimal(config: Option<&Config>) -> Statemap {
-        metadata(config, r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 },
-                "one": {"value": 1 }
-            }
-        }"##)
-    }
-
-    fn data(config: Option<&Config>, data: Vec<&str>) -> Statemap {
-        let mut statemap = minimal(config);
-
-        for mut datum in data {
-            match statemap.ingest_datum(&mut datum) {
-                Err(err) => { panic!("data incorrectly failed: {:?}", err); }
-                Ok(_) => {}
-            }
-        }
-
-        statemap.ingest_end();
-        statemap
-    }
-
-    fn bad_metadata(mut metadata: &str, expected: &str) {
-        let config: Config = Default::default();
-        let mut statemap = Statemap::new(&config);
-
-        match statemap.ingest_metadata(&mut metadata) {
-            Err(err) => {
-                let errmsg = format!("{}", err);
-
-                if errmsg.find(expected).is_none() {
-                    panic!("error ('{}') did not contain '{}' as expected",
-                        errmsg, expected);
-                }
-            },
-            Ok(_) => { panic!("bad metadata succeeded!"); }
-        }
-    }
-
-    fn bad_datum(operand: Option<Statemap>, mut datum: &str, expected: &str) {
-        let mut statemap = match operand {
-            Some(statemap) => statemap,
-            None => {
-                metadata(None, r##"{
-                    "start": [ 0, 0 ],
-                    "title": "Foo",
-                    "states": {
-                        "zero": {"value": 0 },
-                        "one": {"value": 1 }
-                    }
-                }"##)
-            }
-        };
-
-        match statemap.ingest_datum(&mut datum) {
-            Err(err) => {
-                let errmsg = format!("{}", err);
-
-                if errmsg.find(expected).is_none() {
-                    panic!("error ('{}') did not contain '{}' as expected",
-                        errmsg, expected);
-                }
-            },
-            Ok(_) => { panic!("bad datum succeeded!"); }
-        }
-    }
-
-    fn statemap_ingest(statemap: &mut Statemap, raw: &str)
-        -> Result<(), Box<Error>>
-    {
-        let mut path = env::temp_dir();
-        path.push(format!("statemap.test.{}.{:p}", process::id(), statemap));
-
-        let filename = path.to_str().unwrap();
-        let mut file = File::create(filename)?;
-        file.write_all(raw.as_bytes())?;
-
-        let result = statemap.ingest(filename);
-
-        fs::remove_file(filename)?;
-
-        result
-    }
-
-    fn bad_statemap(raw: &str, expected: &str) {
-        let config: Config = Default::default();
-        let mut statemap = Statemap::new(&config);
-
-        match statemap_ingest(&mut statemap, raw) {
-            Err(err) => {
-                let errmsg = format!("{}\n", err);
-
-                if errmsg.find(expected).is_none() {
-                    panic!("error ('{}') did not contain '{}' as expected",
-                        errmsg, expected);
-                }
-            },
-            Ok(_) => { panic!("bad statemap succeeded!"); }
-        }
-    }
-
-    macro_rules! bad_statemap {
-        ($what:expr) => ({
-            bad_statemap(include_str!(concat!("../tst/tst.", $what, ".in")),
-                include_str!(concat!("../tst/tst.", $what, ".err")));
-        });
-    }
-
-    fn good_statemap(config: &Config, raw: &str) -> Statemap {
-        let mut statemap = Statemap::new(&config);
-
-        match statemap_ingest(&mut statemap, raw) {
-            Err(err) => {
-                panic!("statemap failed: {}", err);
-            },
-            Ok(_) => { statemap }
-        }
-    }
-
-    macro_rules! good_statemap {
-        ($what:expr) => ({
-            let mut config: Config = Default::default();
-            config.notags = false;
-
-            good_statemap(&config,
-                include_str!(concat!("../tst/tst.", $what, ".in")))
-        });
-
-        ($what:expr, $conf:expr) => ({
-            good_statemap($conf,
-                include_str!(concat!("../tst/tst.", $what, ".in")))
-        });
-    }
-
-    #[test]
-    fn good_minimal() {
-        metadata(None, r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 }
-            }
-        }"##);
-    }
-
-    #[test]
-    fn bad_title_missing() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "states": {
-                "zero": {"value": 0 }
-            }
-        }"##, "missing field `title`");
-    }
-
-    #[test]
-    fn bad_start_missing() {
-        bad_metadata(r##"{
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 }
-            }
-        }"##, "missing field `start`");
-    }
-
-    #[test]
-    fn bad_start_badval() {
-        bad_metadata(r##"{
-            "start": [ -1, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 }
-            }
-        }"##, "invalid value: integer `-1`");
-    }
-
-    #[test]
-    fn bad_start_tooshort() {
-        bad_metadata(r##"{
-            "start": [ 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 }
-            }
-        }"##, "\"start\" property must be a two element array");
-    }
-
-    #[test]
-    fn bad_start_toolong() {
-        bad_metadata(r##"{
-            "start": [ 0, 0, 3 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 }
-            }
-        }"##, "\"start\" property must be a two element array");
-    }
-
-    #[test]
-    fn bad_states_missing() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo"
-        }"##, "missing field `states`");
-    }
-
-    #[test]
-    fn bad_states_badmap() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": 123
-        }"##, "expected a map");
-    }
-
-    #[test]
-    fn bad_states_value_missing() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {}
-            }
-        }"##, "missing field `value`");
-    }
-
-    #[test]
-    fn bad_states_value_bad() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": -1 }
-            }
-        }"##, "invalid value: integer `-1`");
-    }
-
-    #[test]
-    fn bad_states_value_skipped1() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 0 },
-                "one": {"value": 2 }
-            }
-        }"##, "state \"one\" has value (2) that exceeds maximum");
-    }
-
-    #[test]
-    fn bad_states_value_toohigh() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 1 },
-                "one": {"value": 2 }
-            }
-        }"##, "state \"one\" has value (2) that exceeds maximum");
-    }
-
-    #[test]
-    fn bad_states_value_duplicate() {
-        bad_metadata(r##"{
-            "start": [ 0, 0 ],
-            "title": "Foo",
-            "states": {
-                "zero": {"value": 1 },
-                "one": {"value": 1 }
-            }
-        }"##, "has value (1) that conflicts");
-    }
-
-    #[test]
-    fn bad_line_basic() {
-        bad_statemap!("bad_line_basic");
-    }
-
-    #[test]
-    fn bad_line_whitespace() {
-        bad_statemap!("bad_line_whitespace");
-    }
-
-    #[test]
-    fn bad_line_newline() {
-        bad_statemap!("bad_line_newline");
-    }
-
-    #[test]
-    fn basic() {
-        let statemap = metadata(None, r##"{
-            "start": [ 1528417173, 255882937 ],
-            "title": "Foo",
-            "host": "HA8S7MRD2",
-            "entityKind": "Process",
-            "states": {
-                "on-cpu": {"value": 0, "color": "#2e9107" },
-                "off-cpu-waiting": {"value": 1, "color": "#f9f9f9" },
-                "off-cpu-semop": {"value": 2, "color": "#FF5733" },
-                "off-cpu-blocked": {"value": 3, "color": "#C70039" },
-                "off-cpu-zfs-read": {"value": 4, "color": "#FFC300" },
-                "off-cpu-zfs-write": {"value": 5, "color": "#338AFF" },
-                "off-cpu-zil-commit": {"value": 6, "color": "#66FFCC" },
-                "off-cpu-tx-delay": {"value": 7, "color": "#e1ff00" },
-                "off-cpu-dead": {"value": 8, "color": "#E0E0E0" }
-            }
-        }"##);
-        assert_eq!(statemap.states.len(), 9);
-        assert_eq!(statemap.states[0].name, "on-cpu");
-        assert_eq!(statemap.states[0].color, Some("#2e9107".to_string()));
-        assert_eq!(statemap.states[1].name, "off-cpu-waiting");
-        assert_eq!(statemap.states[1].color, Some("#f9f9f9".to_string()));
-        assert_eq!(statemap.states[8].name, "off-cpu-dead");
-    }
-
-    #[test]
-    fn basic_datum() {
-        let mut _statemap = data(None, vec![
-            r##"{ "time": "156683", "entity": "foo", "state": 0 }"##
-        ]);
-    }
-
-    #[test]
-    fn basic_description() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "156683", "entity": "foo", "state": 0 }"##,
-            r##"{ "entity": "foo", "description": "This is a foo!" }"##
-        ]);
-
-        assert_eq!(statemap.entity_lookup("foo").description,
-            Some("This is a foo!".to_string()));
-    }
-
-    #[test]
-    fn bad_datum_badtime() {
-        bad_datum(None, r##"
-            { "time": 156683, "entity": "foo", "state": 0 }
-        "##, "unrecognized payload");
-    }
-
-    #[test]
-    fn bad_datum_badtime_float() {
-        bad_datum(None, r##"
-            { "time": "156683.12", "entity": "foo", "state": 0 }
-        "##, "unrecognized payload");
-    }
-
-    #[test]
-    fn bad_datum_nostate() {
-        bad_datum(None, r##"
-            { "time": "156683", "entity": "foo" }
-        "##, "unrecognized payload");
-    }
-
-    #[test]
-    fn bad_datum_badstate() {
-        bad_datum(None, r##"
-            { "time": "156683", "entity": "foo", "state": 200 }
-        "##, "illegal state value");
-    }
-
-    #[test]
-    fn bad_datum_backwards() {
-        let statemap = data(None, vec![
-            r##"{ "time": "156683", "entity": "foo", "state": 0 }"##
-        ]);
-
-        bad_datum(Some(statemap), r##"
-            { "time": "156682", "entity": "foo", "state": 1 }
-        "##, "out of order with respect to prior time");
-    }
-
-    #[test]
-    fn basic_data() {
-        let statemap = data(None, vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.verify();
-    }
-
-    #[test]
-    fn subsume() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.print("Initial load");
-        statemap.verify();
-        statemap.subsume_apply_and_verify("foo", 100000);
-        statemap.subsume_apply_and_verify("foo", 300000);
-        statemap.subsume_apply_and_verify("foo", 100000);
-    }
-
-    #[test]
-    fn subsume_right() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.print("Initial load");
-        statemap.verify();
-
-        statemap.subsume_apply_and_verify("foo", 500000);
-        statemap.subsume_apply_and_verify("foo", 400000);
-        statemap.subsume_apply_and_verify("foo", 300000);
-        statemap.subsume_apply_and_verify("foo", 200000);
-    }
-
-    #[test]
-    fn subsume_middle() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.print("Initial load");
-        statemap.verify();
-        statemap.subsume_apply_and_verify("foo", 300000);
-        statemap.subsume_apply_and_verify("foo", 300000);
-        statemap.subsume_apply_and_verify("foo", 200000);
-    }
-
-    #[test]
-    fn subsume_tagged() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "100", "entity": "foo", "state": 0, "tag": "a" }"##,
-            r##"{ "time": "200", "entity": "foo", "state": 1, "tag": "b" }"##,
-            r##"{ "time": "300", "entity": "foo", "state": 0, "tag": "c" }"##,
-            r##"{ "time": "400", "entity": "foo", "state": 1, "tag": "b" }"##,
-            r##"{ "time": "500", "entity": "foo", "state": 0, "tag": "a" }"##,
-            r##"{ "time": "600", "entity": "foo", "state": 1, "tag": "b" }"##
-        ]);
-
-        statemap.print("Initial load");
-        statemap.verify();
-        statemap.subsume_apply_and_verify("foo", 100);
-        statemap.subsume_apply_and_verify("foo", 300);
-        statemap.subsume_apply_and_verify("foo", 100);
-    }
-
-    #[test]
-    fn trim() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "0", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "100", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "101", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "104", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "106", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "206", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "207", "entity": "foo", "state": 0 }"##
-        ]);
-
-        statemap.print("Initial");
-
-        statemap.trim();
-        statemap.verify();
-        statemap.print("After first trim");
-
-        statemap.trim();
-        statemap.verify();
-        statemap.print("After second trim");
-
-        statemap.trim();
-        statemap.verify();
-        statemap.print("After third trim");
-    }
-
-    #[test]
-    fn trim_insert() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "0", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "100", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "101", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "104", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "106", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "206", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "207", "entity": "foo", "state": 0 }"##
-        ]);
-
-        statemap.print("Initial");
-
-        statemap.trim();
-        statemap.verify();
-        statemap.print("After first trim");
-
-        let mut datum = r##"{ "time": "210", "entity": "foo", "state": 1 }"##;
-
-        assert!(statemap.ingest_datum(&mut datum).is_ok());
-        statemap.verify();
-        statemap.print("After insert");
-
-        statemap.trim();
-        statemap.verify();
-        statemap.print("After second trim");
-    }
-
-    #[test]
-    fn trim_multient() {
-        let mut statemap = data(None, vec![
-            r##"{ "time": "0", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "1000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "1010", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "1040", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "1060", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "2060", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "2070", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "0", "entity": "bar", "state": 0 }"##,
-            r##"{ "time": "10", "entity": "bar", "state": 1 }"##,
-        ]);
-
-        statemap.print("Initial");
-
-        statemap.trim();
-        statemap.verify();
-        statemap.print("After trim");
-    }
-
-    #[test]
-    fn data_begin_time() {
-        let mut config: Config = Default::default();
-        config.begin = 200000;
-
-        let statemap = data(Some(&config), vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.verify();
-        statemap.print("Begin at 200000");
-
-        let rects = statemap.get_rects("foo");
-        assert_eq!(rects.len(), 4);
-        assert_eq!(rects[0].0, 200000);
-        assert_eq!(rects[0].1, 300000 - 200000);
-    }
-
-    #[test]
-    fn data_begin_time_later() {
-        let mut config: Config = Default::default();
-        config.begin = 200001;
-
-        let statemap = data(Some(&config), vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.verify();
-        statemap.print("Begin at 200001");
-
-        let rects = statemap.get_rects("foo");
-        assert_eq!(rects.len(), 4);
-        assert_eq!(rects[0].0, 200001);
-        assert_eq!(rects[0].1, 300000 - 200001);
-        assert_eq!((rects[0].2)[0], 0);
-        assert_eq!((rects[0].2)[1], 300000 - 200001);
-    }
-
-    #[test]
-    fn data_begin_end_time() {
-        let mut config: Config = Default::default();
-        config.begin = 250000;
-        config.end = 310000;
-
-        let statemap = data(Some(&config), vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.verify();
-        statemap.print("Begin at 250000, end at 310000");
-
-        let rects = statemap.get_rects("foo");
-        assert_eq!(rects.len(), 2);
-        assert_eq!(rects[0].0, 250000);
-        assert_eq!(rects[0].1, 250000 - 200000);
-        assert_eq!((rects[0].2)[0], 0);
-        assert_eq!((rects[0].2)[1], 250000 - 200000);
-
-        assert_eq!(rects[1].0, 300000);
-        assert_eq!(rects[1].1, 310000 - 300000);
-        assert_eq!((rects[1].2)[0], 310000 - 300000);
-        assert_eq!((rects[1].2)[1], 0);
-    }
-
-    #[test]
-    fn data_wrapped_time() {
-        let mut config: Config = Default::default();
-        config.begin = 250000;
-        config.end = 260000;
-
-        let statemap = data(Some(&config), vec![
-            r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
-            r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
-            r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
-        ]);
-
-        statemap.verify();
-        statemap.print("Begin at 250000, end at 260000");
-
-        let rects = statemap.get_rects("foo");
-        assert_eq!(rects.len(), 1);
-        assert_eq!(rects[0].0, 250000);
-        assert_eq!(rects[0].1, 260000 - 250000);
-        assert_eq!((rects[0].2)[0], 0);
-        assert_eq!((rects[0].2)[1], 260000 - 250000);
-    }
-
-    #[test]
-    fn color_named() {
-        let colors = vec![
-            ("aliceblue", (240, 248, 255)),
-            ("antiquewhite", (250, 235, 215)),
-            ("aqua", (0, 255, 255)),
-            ("aquamarine", (127, 255, 212)),
-            ("azure", (240, 255, 255)),
-            ("beige", (245, 245, 220)),
-            ("bisque", (255, 228, 196)),
-            ("black", (0, 0, 0)),
-            ("blanchedalmond", (255, 235, 205)),
-            ("blue", (0, 0, 255)),
-            ("blueviolet", (138, 43, 226)),
-            ("brown", (165, 42, 42)),
-            ("burlywood", (222, 184, 135)),
-            ("cadetblue", (95, 158, 160)),
-            ("chartreuse", (127, 255, 0)),
-            ("chocolate", (210, 105, 30)),
-            ("coral", (255, 127, 80)),
-            ("cornflowerblue", (100, 149, 237)),
-            ("cornsilk", (255, 248, 220)),
-            ("crimson", (220, 20, 60)),
-            ("cyan", (0, 255, 255)),
-            ("darkblue", (0, 0, 139)),
-            ("darkcyan", (0, 139, 139)),
-            ("darkgoldenrod", (184, 134, 11)),
-            ("darkgray", (169, 169, 169)),
-            ("darkgreen", (0, 100, 0)),
-            ("darkgrey", (169, 169, 169)),
-            ("darkkhaki", (189, 183, 107)),
-            ("darkmagenta", (139, 0, 139)),
-            ("darkolivegreen", (85, 107, 47)),
-            ("darkorange", (255, 140, 0)),
-            ("darkorchid", (153, 50, 204)),
-            ("darkred", (139, 0, 0)),
-            ("darksalmon", (233, 150, 122)),
-            ("darkseagreen", (143, 188, 143)),
-            ("darkslateblue", (72, 61, 139)),
-            ("darkslategray", (47, 79, 79)),
-            ("darkslategrey", (47, 79, 79)),
-            ("darkturquoise", (0, 206, 209)),
-            ("darkviolet", (148, 0, 211)),
-            ("deeppink", (255, 20, 147)),
-            ("deepskyblue", (0, 191, 255)),
-            ("dimgray", (105, 105, 105)),
-            ("dimgrey", (105, 105, 105)),
-            ("dodgerblue", (30, 144, 255)),
-            ("firebrick", (178, 34, 34)),
-            ("floralwhite", (255, 250, 240)),
-            ("forestgreen", (34, 139, 34)),
-            ("fuchsia", (255, 0, 255)),
-            ("gainsboro", (220, 220, 220)),
-            ("ghostwhite", (248, 248, 255)),
-            ("gold", (255, 215, 0)),
-            ("goldenrod", (218, 165, 32)),
-            ("gray", (128, 128, 128)),
-            ("green", (0, 128, 0)),
-            ("greenyellow", (173, 255, 47)),
-            ("grey", (128, 128, 128)),
-            ("honeydew", (240, 255, 240)),
-            ("hotpink", (255, 105, 180)),
-            ("indianred", (205, 92, 92)),
-            ("indigo", (75, 0, 130)),
-            ("ivory", (255, 255, 240)),
-            ("khaki", (240, 230, 140)),
-            ("lavender", (230, 230, 250)),
-            ("lavenderblush", (255, 240, 245)),
-            ("lawngreen", (124, 252, 0)),
-            ("lemonchiffon", (255, 250, 205)),
-            ("lightblue", (173, 216, 230)),
-            ("lightcoral", (240, 128, 128)),
-            ("lightcyan", (224, 255, 255)),
-            ("lightgoldenrodyellow", (250, 250, 210)),
-            ("lightgray", (211, 211, 211)),
-            ("lightgreen", (144, 238, 144)),
-            ("lightgrey", (211, 211, 211)),
-            ("lightpink", (255, 182, 193)),
-            ("lightsalmon", (255, 160, 122)),
-            ("lightseagreen", (32, 178, 170)),
-            ("lightskyblue", (135, 206, 250)),
-            ("lightslategray", (119, 136, 153)),
-            ("lightslategrey", (119, 136, 153)),
-            ("lightsteelblue", (176, 196, 222)),
-            ("lightyellow", (255, 255, 224)),
-            ("lime", (0, 255, 0)),
-            ("limegreen", (50, 205, 50)),
-            ("linen", (250, 240, 230)),
-            ("magenta", (255, 0, 255)),
-            ("maroon", (128, 0, 0)),
-            ("mediumaquamarine", (102, 205, 170)),
-            ("mediumblue", (0, 0, 205)),
-            ("mediumorchid", (186, 85, 211)),
-            ("mediumpurple", (147, 112, 219)),
-            ("mediumseagreen", (60, 179, 113)),
-            ("mediumslateblue", (123, 104, 238)),
-            ("mediumspringgreen", (0, 250, 154)),
-            ("mediumturquoise", (72, 209, 204)),
-            ("mediumvioletred", (199, 21, 133)),
-            ("midnightblue", (25, 25, 112)),
-            ("mintcream", (245, 255, 250)),
-            ("mistyrose", (255, 228, 225)),
-            ("moccasin", (255, 228, 181)),
-            ("navajowhite", (255, 222, 173)),
-            ("navy", (0, 0, 128)),
-            ("oldlace", (253, 245, 230)),
-            ("olive", (128, 128, 0)),
-            ("olivedrab", (107, 142, 35)),
-            ("orange", (255, 165, 0)),
-            ("orangered", (255, 69, 0)),
-            ("orchid", (218, 112, 214)),
-            ("palegoldenrod", (238, 232, 170)),
-            ("palegreen", (152, 251, 152)),
-            ("paleturquoise", (175, 238, 238)),
-            ("palevioletred", (219, 112, 147)),
-            ("papayawhip", (255, 239, 213)),
-            ("peachpuff", (255, 218, 185)),
-            ("peru", (205, 133, 63)),
-            ("pink", (255, 192, 203)),
-            ("plum", (221, 160, 221)),
-            ("powderblue", (176, 224, 230)),
-            ("purple", (128, 0, 128)),
-            ("rebeccapurple", (102, 51, 153)),
-            ("red", (255, 0, 0)),
-            ("rosybrown", (188, 143, 143)),
-            ("royalblue", (65, 105, 225)),
-            ("saddlebrown", (139, 69, 19)),
-            ("salmon", (250, 128, 114)),
-            ("sandybrown", (244, 164, 96)),
-            ("seagreen", (46, 139, 87)),
-            ("seashell", (255, 245, 238)),
-            ("sienna", (160, 82, 45)),
-            ("silver", (192, 192, 192)),
-            ("skyblue", (135, 206, 235)),
-            ("slateblue", (106, 90, 205)),
-            ("slategray", (112, 128, 144)),
-            ("slategrey", (112, 128, 144)),
-            ("snow", (255, 250, 250)),
-            ("springgreen", (0, 255, 127)),
-            ("steelblue", (70, 130, 180)),
-            ("tan", (210, 180, 140)),
-            ("teal", (0, 128, 128)),
-            ("thistle", (216, 191, 216)),
-            ("tomato", (255, 99, 71)),
-            ("turquoise", (64, 224, 208)),
-            ("violet", (238, 130, 238)),
-            ("wheat", (245, 222, 179)),
-            ("white", (255, 255, 255)),
-            ("whitesmoke", (245, 245, 245)),
-            ("yellow", (255, 255, 0)),
-            ("yellowgreen", (154, 205, 50)),
-        ];
-
-        let notcolors = vec!["nixon", "yellowgreenybeeny", "#1234567",
-            "1234567", "$123456", "#123456#" ];
-
-        for i in 0..notcolors.len() {
-            match StatemapColor::from_str(notcolors[i]) {
-                Ok(color) => {
-                    panic!("lookup of {} succeeded with {:?}!",
-                        notcolors[i], color);
-                },
-                Err(err) => {
-                    println!("lookup of {} failed with {}", notcolors[i], err);
-                }
-            }
-        }
-
-        for i in 0..colors.len() {
-            match StatemapColor::from_str(colors[i].0) {
-                Ok(color) => {
-                    let out = format!("rgb({}, {}, {})",
-                        (colors[i].1).0, (colors[i].1).1, (colors[i].1).2);
-                    assert_eq!(out, color.to_string());
-                },
-                Err(err) => {
-                    panic!("lookup of {} failed with {}!", colors[i].0, err);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn color_mix() {
-        let red = StatemapColor::from_str("red").unwrap();
-        let white = StatemapColor::from_str("white").unwrap();
-
-        let tests = vec![
-            (0.0, "rgb(255, 0, 0)"),
-            (0.25, "rgb(255, 137, 137)"),
-            (0.5, "rgb(255, 188, 188)"),
-            (0.75, "rgb(255, 225, 225)"),
-            (1.0, "rgb(255, 255, 255)"),
-        ];
-
-        for i in 0..tests.len() {
-            assert_eq!(red._mix(&white, tests[i].0).to_string(), tests[i].1);
-            assert_eq!(red._mix(&white, tests[i].0).to_string(),
-                white._mix(&red, 1.0 - tests[i].0).to_string());
-        }
-    }
-
-    #[test]
-    fn color_mix_linear() {
-        let color = StatemapColor::from_str("#2e9107").unwrap();
-        let other = StatemapColor::from_str("#f9f9f9").unwrap();
-        let ratio = 351500 as f64 / 840108 as f64;
-        let mix = color._mix(&other, ratio as f32);
-
-        println!("color={}, other={}, mix={}", color, other, mix);
-    }
-
-    #[test]
-    fn color_mix_nonlinear() {
-        let color = StatemapColor::from_str("#2e9107").unwrap();
-        let other = StatemapColor::from_str("#f9f9f9").unwrap();
-        let ratio = 351500 as f64 / 840108 as f64;
-        let mix = color.mix_nonlinear(&other, ratio as f32);
-
-        println!("color={}, other={}, mix={}", color, other, mix);
-    }
-
-    #[test]
-    fn tag_basic() {
-        let statemap = good_statemap!("tag_basic");
-        println!("{:?}", statemap.tags);
-        statemap.verify();
-    }
-
-    #[test]
-    fn tag_redefined() {
-        let statemap = good_statemap!("tag_redefined");
-        println!("{:?}", statemap.tags);
-        statemap.verify();
-    }
-
-    #[test]
-    fn timebounds() {
-        let statemap = good_statemap!("io");
-        let _timebounds = statemap.timebounds();
-
-        let mut config: Config = Default::default();
-        config.begin = 100000;
-
-        let bounded = good_statemap!("io", &config);
-        println!("{:?}", bounded.timebounds());
-
-        config.begin = -100000;
-        config.end = 10000;
-
-        let bounded = good_statemap!("io", &config);
-        println!("{:?}", bounded.timebounds());
-
-        statemap.verify();
-    }
-
-    #[test]
-    fn weight() {
-        let statemap = good_statemap!("io");
-
-        assert_eq!(statemap.weight(0), 737063);
-        assert_eq!(statemap.weight(1), 2290450);
-        assert_eq!(statemap.weight(2), 934399);
-        assert_eq!(statemap.weight(3), 1082403);
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use std::env;
+//     use std::process;
+//     use std::fs;
+//     use std::io::Write;
+
+//     fn metadata(config: Option<&Config>, mut metadata: &str) -> Statemap {
+//         let mut statemap;
+
+//         match config {
+//             Some(config) => { statemap = Statemap::new(&config); },
+//             None => {
+//                 let config: Config = Default::default();
+//                 statemap = Statemap::new(&config);
+//             }
+//         }
+
+//         match statemap.ingest_metadata(&mut metadata) {
+//             Err(err) => { panic!("metadata incorrectly failed: {:?}", err); }
+//             Ok(_) => { statemap }
+//         }
+//     }
+
+//     fn minimal(config: Option<&Config>) -> Statemap {
+//         metadata(config, r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 },
+//                 "one": {"value": 1 }
+//             }
+//         }"##)
+//     }
+
+//     fn data(config: Option<&Config>, data: Vec<&str>) -> Statemap {
+//         let mut statemap = minimal(config);
+
+//         for mut datum in data {
+//             match statemap.ingest_datum(&mut datum) {
+//                 Err(err) => { panic!("data incorrectly failed: {:?}", err); }
+//                 Ok(_) => {}
+//             }
+//         }
+
+//         statemap.ingest_end();
+//         statemap
+//     }
+
+//     fn bad_metadata(mut metadata: &str, expected: &str) {
+//         let config: Config = Default::default();
+//         let mut statemap = Statemap::new(&config);
+
+//         match statemap.ingest_metadata(&mut metadata) {
+//             Err(err) => {
+//                 let errmsg = format!("{}", err);
+
+//                 if errmsg.find(expected).is_none() {
+//                     panic!("error ('{}') did not contain '{}' as expected",
+//                         errmsg, expected);
+//                 }
+//             },
+//             Ok(_) => { panic!("bad metadata succeeded!"); }
+//         }
+//     }
+
+//     fn bad_datum(operand: Option<Statemap>, mut datum: &str, expected: &str) {
+//         let mut statemap = match operand {
+//             Some(statemap) => statemap,
+//             None => {
+//                 metadata(None, r##"{
+//                     "start": [ 0, 0 ],
+//                     "title": "Foo",
+//                     "states": {
+//                         "zero": {"value": 0 },
+//                         "one": {"value": 1 }
+//                     }
+//                 }"##)
+//             }
+//         };
+
+//         match statemap.ingest_datum(&mut datum) {
+//             Err(err) => {
+//                 let errmsg = format!("{}", err);
+
+//                 if errmsg.find(expected).is_none() {
+//                     panic!("error ('{}') did not contain '{}' as expected",
+//                         errmsg, expected);
+//                 }
+//             },
+//             Ok(_) => { panic!("bad datum succeeded!"); }
+//         }
+//     }
+
+//     fn statemap_ingest(statemap: &mut Statemap, raw: &str)
+//         -> Result<(), Box<Error>>
+//     {
+//         let mut path = env::temp_dir();
+//         path.push(format!("statemap.test.{}.{:p}", process::id(), statemap));
+
+//         let filename = path.to_str().unwrap();
+//         let mut file = File::create(filename)?;
+//         file.write_all(raw.as_bytes())?;
+
+//         let result = statemap.ingest(filename);
+
+//         fs::remove_file(filename)?;
+
+//         result
+//     }
+
+//     fn bad_statemap(raw: &str, expected: &str) {
+//         let config: Config = Default::default();
+//         let mut statemap = Statemap::new(&config);
+
+//         match statemap_ingest(&mut statemap, raw) {
+//             Err(err) => {
+//                 let errmsg = format!("{}\n", err);
+
+//                 if errmsg.find(expected).is_none() {
+//                     panic!("error ('{}') did not contain '{}' as expected",
+//                         errmsg, expected);
+//                 }
+//             },
+//             Ok(_) => { panic!("bad statemap succeeded!"); }
+//         }
+//     }
+
+//     macro_rules! bad_statemap {
+//         ($what:expr) => ({
+//             bad_statemap(include_str!(concat!("../tst/tst.", $what, ".in")),
+//                 include_str!(concat!("../tst/tst.", $what, ".err")));
+//         });
+//     }
+
+//     fn good_statemap(config: &Config, raw: &str) -> Statemap {
+//         let mut statemap = Statemap::new(&config);
+
+//         match statemap_ingest(&mut statemap, raw) {
+//             Err(err) => {
+//                 panic!("statemap failed: {}", err);
+//             },
+//             Ok(_) => { statemap }
+//         }
+//     }
+
+//     macro_rules! good_statemap {
+//         ($what:expr) => ({
+//             let mut config: Config = Default::default();
+//             config.notags = false;
+
+//             good_statemap(&config,
+//                 include_str!(concat!("../tst/tst.", $what, ".in")))
+//         });
+
+//         ($what:expr, $conf:expr) => ({
+//             good_statemap($conf,
+//                 include_str!(concat!("../tst/tst.", $what, ".in")))
+//         });
+//     }
+
+//     #[test]
+//     fn good_minimal() {
+//         metadata(None, r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 }
+//             }
+//         }"##);
+//     }
+
+//     #[test]
+//     fn bad_title_missing() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "states": {
+//                 "zero": {"value": 0 }
+//             }
+//         }"##, "missing field `title`");
+//     }
+
+//     #[test]
+//     fn bad_start_missing() {
+//         bad_metadata(r##"{
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 }
+//             }
+//         }"##, "missing field `start`");
+//     }
+
+//     #[test]
+//     fn bad_start_badval() {
+//         bad_metadata(r##"{
+//             "start": [ -1, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 }
+//             }
+//         }"##, "invalid value: integer `-1`");
+//     }
+
+//     #[test]
+//     fn bad_start_tooshort() {
+//         bad_metadata(r##"{
+//             "start": [ 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 }
+//             }
+//         }"##, "\"start\" property must be a two element array");
+//     }
+
+//     #[test]
+//     fn bad_start_toolong() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0, 3 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 }
+//             }
+//         }"##, "\"start\" property must be a two element array");
+//     }
+
+//     #[test]
+//     fn bad_states_missing() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo"
+//         }"##, "missing field `states`");
+//     }
+
+//     #[test]
+//     fn bad_states_badmap() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": 123
+//         }"##, "expected a map");
+//     }
+
+//     #[test]
+//     fn bad_states_value_missing() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {}
+//             }
+//         }"##, "missing field `value`");
+//     }
+
+//     #[test]
+//     fn bad_states_value_bad() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": -1 }
+//             }
+//         }"##, "invalid value: integer `-1`");
+//     }
+
+//     #[test]
+//     fn bad_states_value_skipped1() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 0 },
+//                 "one": {"value": 2 }
+//             }
+//         }"##, "state \"one\" has value (2) that exceeds maximum");
+//     }
+
+//     #[test]
+//     fn bad_states_value_toohigh() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 1 },
+//                 "one": {"value": 2 }
+//             }
+//         }"##, "state \"one\" has value (2) that exceeds maximum");
+//     }
+
+//     #[test]
+//     fn bad_states_value_duplicate() {
+//         bad_metadata(r##"{
+//             "start": [ 0, 0 ],
+//             "title": "Foo",
+//             "states": {
+//                 "zero": {"value": 1 },
+//                 "one": {"value": 1 }
+//             }
+//         }"##, "has value (1) that conflicts");
+//     }
+
+//     #[test]
+//     fn bad_line_basic() {
+//         bad_statemap!("bad_line_basic");
+//     }
+
+//     #[test]
+//     fn bad_line_whitespace() {
+//         bad_statemap!("bad_line_whitespace");
+//     }
+
+//     #[test]
+//     fn bad_line_newline() {
+//         bad_statemap!("bad_line_newline");
+//     }
+
+//     #[test]
+//     fn basic() {
+//         let statemap = metadata(None, r##"{
+//             "start": [ 1528417173, 255882937 ],
+//             "title": "Foo",
+//             "host": "HA8S7MRD2",
+//             "entityKind": "Process",
+//             "states": {
+//                 "on-cpu": {"value": 0, "color": "#2e9107" },
+//                 "off-cpu-waiting": {"value": 1, "color": "#f9f9f9" },
+//                 "off-cpu-semop": {"value": 2, "color": "#FF5733" },
+//                 "off-cpu-blocked": {"value": 3, "color": "#C70039" },
+//                 "off-cpu-zfs-read": {"value": 4, "color": "#FFC300" },
+//                 "off-cpu-zfs-write": {"value": 5, "color": "#338AFF" },
+//                 "off-cpu-zil-commit": {"value": 6, "color": "#66FFCC" },
+//                 "off-cpu-tx-delay": {"value": 7, "color": "#e1ff00" },
+//                 "off-cpu-dead": {"value": 8, "color": "#E0E0E0" }
+//             }
+//         }"##);
+//         assert_eq!(statemap.states.len(), 9);
+//         assert_eq!(statemap.states[0].name, "on-cpu");
+//         assert_eq!(statemap.states[0].color, Some("#2e9107".to_string()));
+//         assert_eq!(statemap.states[1].name, "off-cpu-waiting");
+//         assert_eq!(statemap.states[1].color, Some("#f9f9f9".to_string()));
+//         assert_eq!(statemap.states[8].name, "off-cpu-dead");
+//     }
+
+//     #[test]
+//     fn basic_datum() {
+//         let mut _statemap = data(None, vec![
+//             r##"{ "time": "156683", "entity": "foo", "state": 0 }"##
+//         ]);
+//     }
+
+//     #[test]
+//     fn basic_description() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "156683", "entity": "foo", "state": 0 }"##,
+//             r##"{ "entity": "foo", "description": "This is a foo!" }"##
+//         ]);
+
+//         assert_eq!(statemap.entity_lookup("foo").description,
+//             Some("This is a foo!".to_string()));
+//     }
+
+//     #[test]
+//     fn bad_datum_badtime() {
+//         bad_datum(None, r##"
+//             { "time": 156683, "entity": "foo", "state": 0 }
+//         "##, "unrecognized payload");
+//     }
+
+//     #[test]
+//     fn bad_datum_badtime_float() {
+//         bad_datum(None, r##"
+//             { "time": "156683.12", "entity": "foo", "state": 0 }
+//         "##, "unrecognized payload");
+//     }
+
+//     #[test]
+//     fn bad_datum_nostate() {
+//         bad_datum(None, r##"
+//             { "time": "156683", "entity": "foo" }
+//         "##, "unrecognized payload");
+//     }
+
+//     #[test]
+//     fn bad_datum_badstate() {
+//         bad_datum(None, r##"
+//             { "time": "156683", "entity": "foo", "state": 200 }
+//         "##, "illegal state value");
+//     }
+
+//     #[test]
+//     fn bad_datum_backwards() {
+//         let statemap = data(None, vec![
+//             r##"{ "time": "156683", "entity": "foo", "state": 0 }"##
+//         ]);
+
+//         bad_datum(Some(statemap), r##"
+//             { "time": "156682", "entity": "foo", "state": 1 }
+//         "##, "out of order with respect to prior time");
+//     }
+
+//     #[test]
+//     fn basic_data() {
+//         let statemap = data(None, vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.verify();
+//     }
+
+//     #[test]
+//     fn subsume() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.print("Initial load");
+//         statemap.verify();
+//         statemap.subsume_apply_and_verify("foo", 100000);
+//         statemap.subsume_apply_and_verify("foo", 300000);
+//         statemap.subsume_apply_and_verify("foo", 100000);
+//     }
+
+//     #[test]
+//     fn subsume_right() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.print("Initial load");
+//         statemap.verify();
+
+//         statemap.subsume_apply_and_verify("foo", 500000);
+//         statemap.subsume_apply_and_verify("foo", 400000);
+//         statemap.subsume_apply_and_verify("foo", 300000);
+//         statemap.subsume_apply_and_verify("foo", 200000);
+//     }
+
+//     #[test]
+//     fn subsume_middle() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.print("Initial load");
+//         statemap.verify();
+//         statemap.subsume_apply_and_verify("foo", 300000);
+//         statemap.subsume_apply_and_verify("foo", 300000);
+//         statemap.subsume_apply_and_verify("foo", 200000);
+//     }
+
+//     #[test]
+//     fn subsume_tagged() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "100", "entity": "foo", "state": 0, "tag": "a" }"##,
+//             r##"{ "time": "200", "entity": "foo", "state": 1, "tag": "b" }"##,
+//             r##"{ "time": "300", "entity": "foo", "state": 0, "tag": "c" }"##,
+//             r##"{ "time": "400", "entity": "foo", "state": 1, "tag": "b" }"##,
+//             r##"{ "time": "500", "entity": "foo", "state": 0, "tag": "a" }"##,
+//             r##"{ "time": "600", "entity": "foo", "state": 1, "tag": "b" }"##
+//         ]);
+
+//         statemap.print("Initial load");
+//         statemap.verify();
+//         statemap.subsume_apply_and_verify("foo", 100);
+//         statemap.subsume_apply_and_verify("foo", 300);
+//         statemap.subsume_apply_and_verify("foo", 100);
+//     }
+
+//     #[test]
+//     fn trim() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "0", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "100", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "101", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "104", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "106", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "206", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "207", "entity": "foo", "state": 0 }"##
+//         ]);
+
+//         statemap.print("Initial");
+
+//         statemap.trim();
+//         statemap.verify();
+//         statemap.print("After first trim");
+
+//         statemap.trim();
+//         statemap.verify();
+//         statemap.print("After second trim");
+
+//         statemap.trim();
+//         statemap.verify();
+//         statemap.print("After third trim");
+//     }
+
+//     #[test]
+//     fn trim_insert() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "0", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "100", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "101", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "104", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "106", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "206", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "207", "entity": "foo", "state": 0 }"##
+//         ]);
+
+//         statemap.print("Initial");
+
+//         statemap.trim();
+//         statemap.verify();
+//         statemap.print("After first trim");
+
+//         let mut datum = r##"{ "time": "210", "entity": "foo", "state": 1 }"##;
+
+//         assert!(statemap.ingest_datum(&mut datum).is_ok());
+//         statemap.verify();
+//         statemap.print("After insert");
+
+//         statemap.trim();
+//         statemap.verify();
+//         statemap.print("After second trim");
+//     }
+
+//     #[test]
+//     fn trim_multient() {
+//         let mut statemap = data(None, vec![
+//             r##"{ "time": "0", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "1000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "1010", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "1040", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "1060", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "2060", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "2070", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "0", "entity": "bar", "state": 0 }"##,
+//             r##"{ "time": "10", "entity": "bar", "state": 1 }"##,
+//         ]);
+
+//         statemap.print("Initial");
+
+//         statemap.trim();
+//         statemap.verify();
+//         statemap.print("After trim");
+//     }
+
+//     #[test]
+//     fn data_begin_time() {
+//         let mut config: Config = Default::default();
+//         config.begin = 200000;
+
+//         let statemap = data(Some(&config), vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.verify();
+//         statemap.print("Begin at 200000");
+
+//         let rects = statemap.get_rects("foo");
+//         assert_eq!(rects.len(), 4);
+//         assert_eq!(rects[0].0, 200000);
+//         assert_eq!(rects[0].1, 300000 - 200000);
+//     }
+
+//     #[test]
+//     fn data_begin_time_later() {
+//         let mut config: Config = Default::default();
+//         config.begin = 200001;
+
+//         let statemap = data(Some(&config), vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.verify();
+//         statemap.print("Begin at 200001");
+
+//         let rects = statemap.get_rects("foo");
+//         assert_eq!(rects.len(), 4);
+//         assert_eq!(rects[0].0, 200001);
+//         assert_eq!(rects[0].1, 300000 - 200001);
+//         assert_eq!((rects[0].2)[0], 0);
+//         assert_eq!((rects[0].2)[1], 300000 - 200001);
+//     }
+
+//     #[test]
+//     fn data_begin_end_time() {
+//         let mut config: Config = Default::default();
+//         config.begin = 250000;
+//         config.end = 310000;
+
+//         let statemap = data(Some(&config), vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.verify();
+//         statemap.print("Begin at 250000, end at 310000");
+
+//         let rects = statemap.get_rects("foo");
+//         assert_eq!(rects.len(), 2);
+//         assert_eq!(rects[0].0, 250000);
+//         assert_eq!(rects[0].1, 250000 - 200000);
+//         assert_eq!((rects[0].2)[0], 0);
+//         assert_eq!((rects[0].2)[1], 250000 - 200000);
+
+//         assert_eq!(rects[1].0, 300000);
+//         assert_eq!(rects[1].1, 310000 - 300000);
+//         assert_eq!((rects[1].2)[0], 310000 - 300000);
+//         assert_eq!((rects[1].2)[1], 0);
+//     }
+
+//     #[test]
+//     fn data_wrapped_time() {
+//         let mut config: Config = Default::default();
+//         config.begin = 250000;
+//         config.end = 260000;
+
+//         let statemap = data(Some(&config), vec![
+//             r##"{ "time": "100000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "200000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "300000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "400000", "entity": "foo", "state": 1 }"##,
+//             r##"{ "time": "500000", "entity": "foo", "state": 0 }"##,
+//             r##"{ "time": "600000", "entity": "foo", "state": 1 }"##
+//         ]);
+
+//         statemap.verify();
+//         statemap.print("Begin at 250000, end at 260000");
+
+//         let rects = statemap.get_rects("foo");
+//         assert_eq!(rects.len(), 1);
+//         assert_eq!(rects[0].0, 250000);
+//         assert_eq!(rects[0].1, 260000 - 250000);
+//         assert_eq!((rects[0].2)[0], 0);
+//         assert_eq!((rects[0].2)[1], 260000 - 250000);
+//     }
+
+//     #[test]
+//     fn color_named() {
+//         let colors = vec![
+//             ("aliceblue", (240, 248, 255)),
+//             ("antiquewhite", (250, 235, 215)),
+//             ("aqua", (0, 255, 255)),
+//             ("aquamarine", (127, 255, 212)),
+//             ("azure", (240, 255, 255)),
+//             ("beige", (245, 245, 220)),
+//             ("bisque", (255, 228, 196)),
+//             ("black", (0, 0, 0)),
+//             ("blanchedalmond", (255, 235, 205)),
+//             ("blue", (0, 0, 255)),
+//             ("blueviolet", (138, 43, 226)),
+//             ("brown", (165, 42, 42)),
+//             ("burlywood", (222, 184, 135)),
+//             ("cadetblue", (95, 158, 160)),
+//             ("chartreuse", (127, 255, 0)),
+//             ("chocolate", (210, 105, 30)),
+//             ("coral", (255, 127, 80)),
+//             ("cornflowerblue", (100, 149, 237)),
+//             ("cornsilk", (255, 248, 220)),
+//             ("crimson", (220, 20, 60)),
+//             ("cyan", (0, 255, 255)),
+//             ("darkblue", (0, 0, 139)),
+//             ("darkcyan", (0, 139, 139)),
+//             ("darkgoldenrod", (184, 134, 11)),
+//             ("darkgray", (169, 169, 169)),
+//             ("darkgreen", (0, 100, 0)),
+//             ("darkgrey", (169, 169, 169)),
+//             ("darkkhaki", (189, 183, 107)),
+//             ("darkmagenta", (139, 0, 139)),
+//             ("darkolivegreen", (85, 107, 47)),
+//             ("darkorange", (255, 140, 0)),
+//             ("darkorchid", (153, 50, 204)),
+//             ("darkred", (139, 0, 0)),
+//             ("darksalmon", (233, 150, 122)),
+//             ("darkseagreen", (143, 188, 143)),
+//             ("darkslateblue", (72, 61, 139)),
+//             ("darkslategray", (47, 79, 79)),
+//             ("darkslategrey", (47, 79, 79)),
+//             ("darkturquoise", (0, 206, 209)),
+//             ("darkviolet", (148, 0, 211)),
+//             ("deeppink", (255, 20, 147)),
+//             ("deepskyblue", (0, 191, 255)),
+//             ("dimgray", (105, 105, 105)),
+//             ("dimgrey", (105, 105, 105)),
+//             ("dodgerblue", (30, 144, 255)),
+//             ("firebrick", (178, 34, 34)),
+//             ("floralwhite", (255, 250, 240)),
+//             ("forestgreen", (34, 139, 34)),
+//             ("fuchsia", (255, 0, 255)),
+//             ("gainsboro", (220, 220, 220)),
+//             ("ghostwhite", (248, 248, 255)),
+//             ("gold", (255, 215, 0)),
+//             ("goldenrod", (218, 165, 32)),
+//             ("gray", (128, 128, 128)),
+//             ("green", (0, 128, 0)),
+//             ("greenyellow", (173, 255, 47)),
+//             ("grey", (128, 128, 128)),
+//             ("honeydew", (240, 255, 240)),
+//             ("hotpink", (255, 105, 180)),
+//             ("indianred", (205, 92, 92)),
+//             ("indigo", (75, 0, 130)),
+//             ("ivory", (255, 255, 240)),
+//             ("khaki", (240, 230, 140)),
+//             ("lavender", (230, 230, 250)),
+//             ("lavenderblush", (255, 240, 245)),
+//             ("lawngreen", (124, 252, 0)),
+//             ("lemonchiffon", (255, 250, 205)),
+//             ("lightblue", (173, 216, 230)),
+//             ("lightcoral", (240, 128, 128)),
+//             ("lightcyan", (224, 255, 255)),
+//             ("lightgoldenrodyellow", (250, 250, 210)),
+//             ("lightgray", (211, 211, 211)),
+//             ("lightgreen", (144, 238, 144)),
+//             ("lightgrey", (211, 211, 211)),
+//             ("lightpink", (255, 182, 193)),
+//             ("lightsalmon", (255, 160, 122)),
+//             ("lightseagreen", (32, 178, 170)),
+//             ("lightskyblue", (135, 206, 250)),
+//             ("lightslategray", (119, 136, 153)),
+//             ("lightslategrey", (119, 136, 153)),
+//             ("lightsteelblue", (176, 196, 222)),
+//             ("lightyellow", (255, 255, 224)),
+//             ("lime", (0, 255, 0)),
+//             ("limegreen", (50, 205, 50)),
+//             ("linen", (250, 240, 230)),
+//             ("magenta", (255, 0, 255)),
+//             ("maroon", (128, 0, 0)),
+//             ("mediumaquamarine", (102, 205, 170)),
+//             ("mediumblue", (0, 0, 205)),
+//             ("mediumorchid", (186, 85, 211)),
+//             ("mediumpurple", (147, 112, 219)),
+//             ("mediumseagreen", (60, 179, 113)),
+//             ("mediumslateblue", (123, 104, 238)),
+//             ("mediumspringgreen", (0, 250, 154)),
+//             ("mediumturquoise", (72, 209, 204)),
+//             ("mediumvioletred", (199, 21, 133)),
+//             ("midnightblue", (25, 25, 112)),
+//             ("mintcream", (245, 255, 250)),
+//             ("mistyrose", (255, 228, 225)),
+//             ("moccasin", (255, 228, 181)),
+//             ("navajowhite", (255, 222, 173)),
+//             ("navy", (0, 0, 128)),
+//             ("oldlace", (253, 245, 230)),
+//             ("olive", (128, 128, 0)),
+//             ("olivedrab", (107, 142, 35)),
+//             ("orange", (255, 165, 0)),
+//             ("orangered", (255, 69, 0)),
+//             ("orchid", (218, 112, 214)),
+//             ("palegoldenrod", (238, 232, 170)),
+//             ("palegreen", (152, 251, 152)),
+//             ("paleturquoise", (175, 238, 238)),
+//             ("palevioletred", (219, 112, 147)),
+//             ("papayawhip", (255, 239, 213)),
+//             ("peachpuff", (255, 218, 185)),
+//             ("peru", (205, 133, 63)),
+//             ("pink", (255, 192, 203)),
+//             ("plum", (221, 160, 221)),
+//             ("powderblue", (176, 224, 230)),
+//             ("purple", (128, 0, 128)),
+//             ("rebeccapurple", (102, 51, 153)),
+//             ("red", (255, 0, 0)),
+//             ("rosybrown", (188, 143, 143)),
+//             ("royalblue", (65, 105, 225)),
+//             ("saddlebrown", (139, 69, 19)),
+//             ("salmon", (250, 128, 114)),
+//             ("sandybrown", (244, 164, 96)),
+//             ("seagreen", (46, 139, 87)),
+//             ("seashell", (255, 245, 238)),
+//             ("sienna", (160, 82, 45)),
+//             ("silver", (192, 192, 192)),
+//             ("skyblue", (135, 206, 235)),
+//             ("slateblue", (106, 90, 205)),
+//             ("slategray", (112, 128, 144)),
+//             ("slategrey", (112, 128, 144)),
+//             ("snow", (255, 250, 250)),
+//             ("springgreen", (0, 255, 127)),
+//             ("steelblue", (70, 130, 180)),
+//             ("tan", (210, 180, 140)),
+//             ("teal", (0, 128, 128)),
+//             ("thistle", (216, 191, 216)),
+//             ("tomato", (255, 99, 71)),
+//             ("turquoise", (64, 224, 208)),
+//             ("violet", (238, 130, 238)),
+//             ("wheat", (245, 222, 179)),
+//             ("white", (255, 255, 255)),
+//             ("whitesmoke", (245, 245, 245)),
+//             ("yellow", (255, 255, 0)),
+//             ("yellowgreen", (154, 205, 50)),
+//         ];
+
+//         let notcolors = vec!["nixon", "yellowgreenybeeny", "#1234567",
+//             "1234567", "$123456", "#123456#" ];
+
+//         for i in 0..notcolors.len() {
+//             match StatemapColor::from_str(notcolors[i]) {
+//                 Ok(color) => {
+//                     panic!("lookup of {} succeeded with {:?}!",
+//                         notcolors[i], color);
+//                 },
+//                 Err(err) => {
+//                     println!("lookup of {} failed with {}", notcolors[i], err);
+//                 }
+//             }
+//         }
+
+//         for i in 0..colors.len() {
+//             match StatemapColor::from_str(colors[i].0) {
+//                 Ok(color) => {
+//                     let out = format!("rgb({}, {}, {})",
+//                         (colors[i].1).0, (colors[i].1).1, (colors[i].1).2);
+//                     assert_eq!(out, color.to_string());
+//                 },
+//                 Err(err) => {
+//                     panic!("lookup of {} failed with {}!", colors[i].0, err);
+//                 }
+//             }
+//         }
+//     }
+
+//     #[test]
+//     fn color_mix() {
+//         let red = StatemapColor::from_str("red").unwrap();
+//         let white = StatemapColor::from_str("white").unwrap();
+
+//         let tests = vec![
+//             (0.0, "rgb(255, 0, 0)"),
+//             (0.25, "rgb(255, 137, 137)"),
+//             (0.5, "rgb(255, 188, 188)"),
+//             (0.75, "rgb(255, 225, 225)"),
+//             (1.0, "rgb(255, 255, 255)"),
+//         ];
+
+//         for i in 0..tests.len() {
+//             assert_eq!(red._mix(&white, tests[i].0).to_string(), tests[i].1);
+//             assert_eq!(red._mix(&white, tests[i].0).to_string(),
+//                 white._mix(&red, 1.0 - tests[i].0).to_string());
+//         }
+//     }
+
+//     #[test]
+//     fn color_mix_linear() {
+//         let color = StatemapColor::from_str("#2e9107").unwrap();
+//         let other = StatemapColor::from_str("#f9f9f9").unwrap();
+//         let ratio = 351500 as f64 / 840108 as f64;
+//         let mix = color._mix(&other, ratio as f32);
+
+//         println!("color={}, other={}, mix={}", color, other, mix);
+//     }
+
+//     #[test]
+//     fn color_mix_nonlinear() {
+//         let color = StatemapColor::from_str("#2e9107").unwrap();
+//         let other = StatemapColor::from_str("#f9f9f9").unwrap();
+//         let ratio = 351500 as f64 / 840108 as f64;
+//         let mix = color.mix_nonlinear(&other, ratio as f32);
+
+//         println!("color={}, other={}, mix={}", color, other, mix);
+//     }
+
+//     #[test]
+//     fn tag_basic() {
+//         let statemap = good_statemap!("tag_basic");
+//         println!("{:?}", statemap.tags);
+//         statemap.verify();
+//     }
+
+//     #[test]
+//     fn tag_redefined() {
+//         let statemap = good_statemap!("tag_redefined");
+//         println!("{:?}", statemap.tags);
+//         statemap.verify();
+//     }
+
+//     #[test]
+//     fn timebounds() {
+//         let statemap = good_statemap!("io");
+//         let _timebounds = statemap.timebounds();
+
+//         let mut config: Config = Default::default();
+//         config.begin = 100000;
+
+//         let bounded = good_statemap!("io", &config);
+//         println!("{:?}", bounded.timebounds());
+
+//         config.begin = -100000;
+//         config.end = 10000;
+
+//         let bounded = good_statemap!("io", &config);
+//         println!("{:?}", bounded.timebounds());
+
+//         statemap.verify();
+//     }
+
+//     #[test]
+//     fn weight() {
+//         let statemap = good_statemap!("io");
+
+//         assert_eq!(statemap.weight(0), 737063);
+//         assert_eq!(statemap.weight(1), 2290450);
+//         assert_eq!(statemap.weight(2), 934399);
+//         assert_eq!(statemap.weight(3), 1082403);
+//     }
+// }
