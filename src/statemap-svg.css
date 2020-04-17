@@ -1,0 +1,182 @@
+/*
+ * Copyright 2018, Joyent, Inc.
+ */
+
+.sansserif {
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+}
+
+.button {
+        fill: #fff;
+}
+
+.statemap-border {
+	fill: none;
+	stroke: black;
+	stroke-width: 0.5;
+}
+
+.statemap-highlight {
+	fill:		blue;
+}
+
+.statemap-title {
+	font-size:	10pt;
+	font-weight:	bold;
+	text-anchor:	middle;
+	cursor:		default;
+}
+
+.statemap-timelabel {
+	font-size:	8pt;
+	text-anchor:	middle;
+	cursor:		default;
+}
+
+.statemap-timebar {
+	stroke:		blue;
+	fill:		blue;
+	stroke-width:	1px;
+}
+
+.statemap-timetext {
+	font-size:	8pt;
+	font-weight:	normal;
+	fill:		blue;
+	stroke:		blue;
+	stroke-width:	0px;
+	cursor:		default;
+}
+
+.statemap-timebreaktext {
+	font-size:	8pt;
+	font-weight:	bold;
+	fill:		blue;
+	stroke:		white;
+	stroke-width:	0.3px;
+	cursor:		default;
+}
+
+.statemap-subbar {
+	stroke:		blue;
+	fill:		blue;
+	stroke-width:	1px;
+	stroke-dasharray: 5.7;
+}
+
+.statemap-subbar-span {
+	stroke:		blue;
+	fill:		blue;
+	stroke-width:	0.75px;
+	stroke-dasharray: 1;
+}
+
+.statemap-subbar-text {
+	font-size:	8pt;
+	font-weight:	bold;
+	fill:		blue;
+	stroke:		white;
+	stroke-width:	0.3px;
+	cursor:		default;
+}
+
+.statemap-statebar {
+	stroke:		blue;
+	fill:		blue;
+	stroke-width:	1px;
+}
+
+.statemap-statetext {
+	font-size:	8pt;
+	font-weight:	normal;
+	fill:		blue;
+	stroke:		blue;
+	stroke-width:	0px;
+	cursor:		default;
+}
+
+.statemap-timeline {
+	stroke: black;
+	stroke-width:	0.5pt;
+	marker-start:	url(#startarrow);
+	marker-end:	url(#endarrow);
+}
+
+.statemap-legend {
+	stroke: black;
+	stroke-width:	0.5pt;
+}
+
+.statemap-legend-highlighted {
+	stroke:		blue;
+	stroke-width:	3pt;
+}
+
+.statemap-legendlabel {
+	font-size:	7pt;
+	text-anchor:	middle;
+	cursor:		default;
+}
+
+.statemap-tagbox {
+	stroke:		black;
+	stroke-width:	0.5pt;
+	alignment-baseline:	hanging;
+	text-anchor:	start;
+	cursor:		default;
+}
+
+.statemap-tagbox-header {
+	font-size:	9pt;
+	font-weight:	bold;
+	text-anchor:	start;
+	font-style:	oblique;
+	cursor:		default;
+}
+
+.statemap-tagbox-header-line {
+	stroke:		black;
+	stroke-width:	1pt;
+}
+
+.statemap-tagbox-tag {
+	font-size:	9pt;
+	cursor:		default;
+}
+
+.statemap-tagbox-tag-highlighted {
+	font-weight:	bold;
+}
+
+.statemap-tagbox-select-header {
+	font-size:	8pt;
+	text-anchor:	start;
+	font-style:	oblique;
+	cursor:		default;
+}
+
+.statemap-tagbox-select {
+	font-size:	8pt;
+	text-anchor:	start;
+	cursor:		default;
+}
+
+.statemap-tagbox-select-perc {
+	font-size:	8pt;
+	text-anchor:	end;
+	cursor:		default;
+}
+
+.statemap-tagbox-select-header-line {
+	stroke:		black;
+	stroke-width:	0.5pt;
+}
+
+.statemap-tagbox-select-sum-line {
+	stroke:		black;
+	stroke-width:	0.25pt;
+}
+
+.statemap-tagbox-select-highlighted {
+	font-weight:	bold;
+}
