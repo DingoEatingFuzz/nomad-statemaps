@@ -1,0 +1,1 @@
+This would theoretically go into Nomad core. It was quicker to prototype in a brittle node server off to the side.
